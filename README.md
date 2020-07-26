@@ -10,11 +10,9 @@ Duke Data Science Team
 
 First install the required dependencies (given python 3.6x):
 
-1) Tensorflow	
-2) gensim	
-3) numpy	
-4) argparse	
-5) nltk
+1) nltk
+2) gensim
+3) numpy
 
 Then download the 6 billion tokenn GloVe dictionary from [2] and unzip contents into *glove* directory (glove.6B.300d.word2vec.txt)
 
