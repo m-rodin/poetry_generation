@@ -16,7 +16,7 @@ First install the required dependencies (given python 3.6x):
 4) argparse	
 5) nltk
 
-Then download the 6 billion tokenn GloVe dictionary from [2] and unzip contents into *glove* directory
+Then download the 6 billion tokenn GloVe dictionary from [2] and unzip contents into *glove* directory (glove.6B.300d.word2vec.txt)
 
 Execute the following to generate a poem:
 
