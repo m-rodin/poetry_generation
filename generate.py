@@ -433,8 +433,6 @@ def postProcess(poemOrig, model):
     return ret
 
 if(__name__ == "__main__"):
-    
-    start_time = time.time()
 
     # system arguments
     topic = sys.argv[1]
@@ -449,7 +447,7 @@ if(__name__ == "__main__"):
     glove_model = KeyedVectors.load_word2vec_format('./glove/glove.6B.300d.word2vec.txt', binary=False)
     glove_words = glove_model.vocab.keys()
 
-    source_words, source_texts = get_source_texts('../poetry-generation/data/whitman/input.txt')
+    source_words, source_texts = get_source_texts('./data/whitman/input.txt')
 
     cmu_word2meters, cmu_word2syllables, cmu_word2rhyme = get_cmu_dicts('./cmudict-0.7b.txt')
 
@@ -469,16 +467,10 @@ if(__name__ == "__main__"):
     word_selector = WordSelector(meter2words, line_pattern)
     pos_filer = POSFiter(words)
     
-    print("\nDICT PREPARITIONS", time.time() - start_time)
-    start_time = time.time()
-    
     width = 20
     
     rhyme_pairs = sample_rhyme_pairs(topic, words, word2rhyme, rhyme2words, {}, glove_model)
     last_words = make_author_order(rhyme_pairs, sonnet_pattern)
-    
-    print("\nRHYMES", time.time() - start_time)
-    start_time = time.time()
     
     poem = []
     
@@ -500,8 +492,6 @@ if(__name__ == "__main__"):
         line = sampleLine(lines)
 
         poem.append(line)
-        
-    print("\nLINES", time.time() - start_time)
         
     poem_p = postProcess(poem, model)
 
