@@ -11,13 +11,13 @@ Duke Data Science Team
 First install the required dependencies (given python 3.6x):
 
 1) pytorch
-1) torchtext
-2) gensim	
-3) numpy	
-4) argparse	
-5) nltk
+2) torchtext
+3) gensim	
+4) numpy	
+5) argparse	
+6) nltk
 
-Then download the 6 billion tokenn GloVe dictionary from [2] and unzip contents into *glove* directory
+Then download the 6 billion tokenn GloVe dictionary from [2] and unzip contents into *glove* directory (glove.6B.300d.word2vec.txt)
 
 Execute the following to train model:
 python train.py
