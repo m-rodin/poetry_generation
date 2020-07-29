@@ -9,10 +9,12 @@ import itertools
 import pickle
 import queue as Q
 import time
+import torch
 
-from text_prepocessing import simple_clean
-from pos_filter import POSFiter
-from word_selector import WordSelector
+from src.text_prepocessing import simple_clean
+from src.pos_filter import POSFiter
+from src.word_selector import WordSelector
+from model import LSTMModel
 
 from gensim.models.keyedvectors import KeyedVectors
 
@@ -210,7 +212,7 @@ def sample_rhyme_pairs(topic, words, word2rhyme, rhyme2words, model_vocab, glove
         good_pairs.append(pair)
     
     common_indexes = np.random.choice(len(good_pairs), common_pairs)
-    pairs_picked += [pairs[index] for index in common_indexes]
+    pairs_picked += [good_pairs[index] for index in common_indexes]
 
     return pairs_picked
 
@@ -257,7 +259,8 @@ def search_line_variants(
     masterPQ = Q.PriorityQueue()
     
     #initial case
-    init_prob, init_state = model.init_values()
+    init_prob = 0.
+    init_state = model.zero_state(1)
     
     body = Message(init_prob, init_state, sequence, end_index)
 
@@ -318,7 +321,7 @@ def decayRepeat(word, sequence, scale):
 def beamSearchOneLevel(model, message, pos_filer, word_selector, scale = .02):
     result = []
     
-    dist, state = model.predict(message)
+    dist, state = model.next_word(message.sequence[0], message.state)
     
     for word, start_index in word_selector.get_suitable_words(message.end_index):
         
@@ -339,7 +342,7 @@ def beamSearchOneLevel(model, message, pos_filer, word_selector, scale = .02):
         #repeats
         score_adjust = decayRepeat(word, message.sequence, 100 * scale)
         #length word
-        score_adjust += len(word) * scale / 50
+        #score_adjust += len(word) * scale / 50
         
         m = Message(new_prob + score_adjust, state, [word] + message.sequence, start_index)
 
@@ -353,26 +356,12 @@ def sampleLine(lines):
     
     top_k = min(10, len(lines))
     
-    probs = list(map(lambda m: np.exp(m.prob), lines[:top_k]))    
+    probs = list(map(lambda m: m.prob, lines[:top_k]))
     probs = np.exp(probs) / sum(np.exp(probs))
     
     index = np.random.choice(range(top_k), 1, p=probs)[0]
     
     return lines[index].sequence
-
-
-class ModelMock:
-    def __init__(self):
-        pass
-    
-    def init_values(self):
-        return np.array([[0]]), [1,2,3] # init_prob, init_state
-    
-    def predict(self, message):
-        return [np.random.uniform()], [1,2,3]
-    
-    def get_token(self, word):
-        return 0
 
 
 def postProcess(poemOrig, model):
@@ -389,12 +378,13 @@ def postProcess(poemOrig, model):
     rev_flat_poem = [x for x in reversed(flat_poem)]
     n_spots = len(rev_flat_poem) - 1
     
-    comma_probs = np.zeros(n_spots)    
+    comma_probs = np.zeros(n_spots)
+    state = model.zero_state(1)
     
     for i in range(n_spots):
             seq = [y for y in reversed(rev_flat_poem[:i+1])] #so we're iterating from the rhyme word, but need to feed in forward
             
-            p, state = model.predict(1)
+            p, state = model.next_word(seq[0], state)
             comma_probs[i] = p[model.get_token(",")]
             
     comma_probs = np.array([y for y in reversed(comma_probs)])
@@ -432,6 +422,8 @@ def postProcess(poemOrig, model):
 
     return ret
 
+
+
 if(__name__ == "__main__"):
 
     # system arguments
@@ -458,7 +450,13 @@ if(__name__ == "__main__"):
     cmu_meter2words = get_meter2words(cmu_word2meters)
     cmu_words = list(cmu_word2meters.keys())
     
-    model = ModelMock()
+    with open('model/vocab.pkl', 'rb') as vocab_file:
+        vocab = pickle.load(vocab_file)
+    
+    model = LSTMModel(len(vocab), 300, 1000, 3)
+    model.load_state_dict(torch.load('model/model-last.pth'))
+    model.set_vocab(vocab)
+    model.eval()
     
     line_pattern = "0101010101"
     sonnet_pattern = "ABAB CDCD EFEF GG"

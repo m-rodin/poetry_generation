@@ -10,7 +10,8 @@ Duke Data Science Team
 
 First install the required dependencies (given python 3.6x):
 
-1) Tensorflow	
+1) pytorch
+1) torchtext
 2) gensim	
 3) numpy	
 4) argparse	
@@ -18,8 +19,10 @@ First install the required dependencies (given python 3.6x):
 
 Then download the 6 billion tokenn GloVe dictionary from [2] and unzip contents into *glove* directory
 
-Execute the following to generate a poem:
+Execute the following to train model:
+python train.py
 
+Execute the following to generate a poem:
 python generate.py *topic seed*
 
 where *topic* is the user-supplied topic of the poem and *seed* (an optional argument) is an integer for the seed.
