@@ -16,6 +16,7 @@ First install the required dependencies (given python 3.6x):
 4) numpy	
 5) argparse	
 6) nltk
+7) corpy
 
 Then download the 6 billion tokenn GloVe dictionary from [2] and unzip contents into *glove* directory (glove.6B.300d.word2vec.txt)
 

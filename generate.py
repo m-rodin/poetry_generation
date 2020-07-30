@@ -12,7 +12,7 @@ import time
 import torch
 
 from src.text_prepocessing import simple_clean
-from src.pos_filter import POSFiter
+from src.pos_filter import POSFiter, NLTKTagger, UdpipeTagger
 from src.word_selector import WordSelector
 from model import LSTMModel
 
@@ -197,23 +197,28 @@ def sample_rhyme_pairs(topic, words, word2rhyme, rhyme2words, model_vocab, glove
     
     # дернули топ 50 рифм (тут какой-то тупой фильтр на алфавит, выглядит бесполезным)
     pairs = [x[0] for x in common.most_common(50) if all(word not in alphabet for word in x[0])]
-
-    good_pairs = []
-    for pair in pairs:
-        if pair[0] not in word2rhyme:
-            continue
-        if word2rhyme[pair[0]] in rhyme_used:
-            continue
-#        if pair[0] not in model_vocab:
-#            continue
-#        if pair[1] not in model_vocab:
-#            continue
-
-        good_pairs.append(pair)
     
-    common_indexes = np.random.choice(len(good_pairs), common_pairs)
-    pairs_picked += [good_pairs[index] for index in common_indexes]
-
+    for i in range(common_pairs):
+        good_pairs = []
+        for pair in pairs:
+            if pair[0] not in word2rhyme:
+                continue
+            if word2rhyme[pair[0]] in rhyme_used:
+                continue
+#           if pair[0] not in model_vocab:
+#               continue
+#           if pair[1] not in model_vocab:
+#               continue
+            good_pairs.append(pair)
+        
+        common_index = np.random.choice(len(good_pairs), 1)[0]
+        pair = good_pairs[common_index]
+        
+        pairs_picked.append(pair)
+        
+        rhyme = word2rhyme[pair[0]]
+        rhyme_used.add(rhyme)        
+    
     return pairs_picked
 
 
@@ -342,7 +347,7 @@ def beamSearchOneLevel(model, message, pos_filer, word_selector, scale = .02):
         #repeats
         score_adjust = decayRepeat(word, message.sequence, 100 * scale)
         #length word
-        #score_adjust += len(word) * scale / 50
+        score_adjust += len(word) * scale / 50
         
         m = Message(new_prob + score_adjust, state, [word] + message.sequence, start_index)
 
@@ -463,7 +468,9 @@ if(__name__ == "__main__"):
     
     # здесь скорее всего надо cmu_meter2words
     word_selector = WordSelector(meter2words, line_pattern)
-    pos_filer = POSFiter(words)
+
+    pos_tagger = UdpipeTagger('./english-gum-ud-2.5-191206.udpipe')
+    pos_filer = POSFiter(words, pos_tagger)
     
     width = 20
     
@@ -495,5 +502,5 @@ if(__name__ == "__main__"):
 
     with open("./output_poems/%s.txt" % topic, "w") as text_file:
         print("(saved in output_poems)")
-        print("\n", topic, "\n", poem_p)
+        print("\n topic:" + topic, "\n\n" + poem_p)
         text_file.write(topic + "\n\n" + poem_p)

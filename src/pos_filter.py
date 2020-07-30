@@ -1,8 +1,34 @@
 import nltk
+from corpy.udpipe import Model
+
+# +
+class NLTKTagger:
+    def get_pos_tag(self, word):
+            token = nltk.word_tokenize(word)
+            tag = nltk.pos_tag(token)
+            return tag[0][1]
+        
+class UdpipeTagger:
+    def __init__(self, model_path = None):
+        if model_path:
+            self.model = Model(model_path)
+        else:
+            raise Exception("You should pass the model")
+        
+    def get_pos_tag(self, word):
+        sent = list(self.model.process(word))[0]
+        
+        if len(sent.words) != 2:
+            print(word, sent.words)
+        
+        return sent.words[1].xpostag
+
+
+# -
 
 class POSFiter:
-    def __init__(self, words):
-        self.word2pos = self.get_word2pos(words)
+    def __init__(self, words, tagger):
+        self.word2pos = self.get_word2pos(words, tagger)
         self.possible_pos_pairs = self.get_possible_pos_pairs()
 
     def can_follow(self, word1, word2):
@@ -16,16 +42,8 @@ class POSFiter:
 
         return tag1 in self.possible_pos_pairs[tag2]
         
-    def get_word2pos(self, words, ):
-        word2pos = {}
-
-        for word in words:
-            token = nltk.word_tokenize(word)
-            tag = nltk.pos_tag(token)
-
-            word2pos[word] = tag[0][1]
-
-        return word2pos
+    def get_word2pos(self, words, tagger):
+        return {word: tagger.get_pos_tag(word) for word in words}
     
     def get_possible_pos_pairs(self):
         #DICTIONARY IS OF FORM (KEY: post_word_pos);(VALUE: pre_word_pos)
