@@ -14,9 +14,8 @@ import torch
 from src.text_prepocessing import simple_clean
 from src.pos_filter import POSFiter, NLTKTagger, UdpipeTagger
 from src.word_selector import WordSelector
+from src.word_embedder import GloveEmbedder
 from model import LSTMModel
-
-from gensim.models.keyedvectors import KeyedVectors
 
 
 # -
@@ -89,7 +88,7 @@ def get_source_texts(texts_path):
     return words, texts
 
 
-def intersect_words(source_words, glove_words, cmu_word2meters, cmu_word2syllables, cmu_word2rhyme):
+def intersect_words(source_words, embedder, cmu_word2meters, cmu_word2syllables, cmu_word2rhyme):
     words = []
 
     for word, meters in cmu_word2meters.items():
@@ -97,8 +96,8 @@ def intersect_words(source_words, glove_words, cmu_word2meters, cmu_word2syllabl
         if word not in source_words:
             continue
 
-        # оставим только те слова у которых есть glove векторы
-        if word not in glove_words:
+        # оставим только те слова у которых есть векторы
+        if not embedder.exist_emb(word):
             continue
 
         # оставляем только слова с правильным ритмом
@@ -138,23 +137,17 @@ def get_meter2words(word2meters):
     return meter2words
 
 
-# +
 def cos_sim(w1, w2):
     return np.dot(w1, w2) / np.linalg.norm(w1) / np.linalg.norm(w2)
 
-def calculate_mean_glove(words):
-    return np.mean([glove_model[word] for word in words], axis=0)
 
-
-# -
-
-def sample_rhyme_pairs(topic, words, word2rhyme, rhyme2words, model_vocab, glove_model, topic_pairs = 5, common_pairs = 2):
+def sample_rhyme_pairs(topic, words, word2rhyme, rhyme2words, model_vocab, embedder, topic_pairs = 5, common_pairs = 2):
     
-    topic_glove = calculate_mean_glove(topic.split())
+    topic_emb = np.mean([embedder.get_emb(word) for word in topic.split()], axis=0)
     
     # дистанция для каждого слова из текстов до prompt
     dist_word2topic = dict(zip(
-        words, [cos_sim(topic_glove, glove_model[word]) for word in words]
+        words, [cos_sim(topic_emb, embedder.get_emb(word)) for word in words]
     ))
     
     rhyme_used = set()
@@ -387,7 +380,8 @@ def postProcess(poemOrig, model):
     state = model.zero_state(1)
     
     for i in range(n_spots):
-            seq = [y for y in reversed(rev_flat_poem[:i+1])] #so we're iterating from the rhyme word, but need to feed in forward
+            #so we're iterating from the rhyme word, but need to feed in forward
+            seq = [y for y in reversed(rev_flat_poem[:i+1])]
             
             p, state = model.next_word(seq[0], state)
             comma_probs[i] = p[model.get_token(",")]
@@ -427,8 +421,6 @@ def postProcess(poemOrig, model):
 
     return ret
 
-
-
 if(__name__ == "__main__"):
 
     # system arguments
@@ -441,15 +433,14 @@ if(__name__ == "__main__"):
         seed = 1
     np.random.seed(seed)
     
-    glove_model = KeyedVectors.load_word2vec_format('./glove/glove.6B.300d.word2vec.txt', binary=False)
-    glove_words = glove_model.vocab.keys()
+    embedder = GloveEmbedder()
 
     source_words, source_texts = get_source_texts('./data/whitman/input.txt')
 
     cmu_word2meters, cmu_word2syllables, cmu_word2rhyme = get_cmu_dicts('./cmudict-0.7b.txt')
 
     words, word2meters, meter2words, word2syllable, word2rhyme, rhyme2words = intersect_words(
-        source_words, glove_words, cmu_word2meters, cmu_word2syllables, cmu_word2rhyme
+        source_words, embedder, cmu_word2meters, cmu_word2syllables, cmu_word2rhyme
     )
     
     cmu_meter2words = get_meter2words(cmu_word2meters)
@@ -474,7 +465,7 @@ if(__name__ == "__main__"):
     
     width = 20
     
-    rhyme_pairs = sample_rhyme_pairs(topic, words, word2rhyme, rhyme2words, {}, glove_model)
+    rhyme_pairs = sample_rhyme_pairs(topic, words, word2rhyme, rhyme2words, {}, embedder)
     last_words = make_author_order(rhyme_pairs, sonnet_pattern)
     
     poem = []
