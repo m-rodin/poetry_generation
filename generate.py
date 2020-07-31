@@ -319,7 +319,7 @@ def decayRepeat(word, sequence, scale):
 def beamSearchOneLevel(model, message, pos_filer, word_selector, scale = .02):
     result = []
     
-    dist, state = model.next_word(message.sequence[0], message.state)
+    dist, state = model.next_word(message.sequence[0], message.state, message.prob)
     
     for word, start_index in word_selector.get_suitable_words(message.end_index):
         
@@ -338,9 +338,10 @@ def beamSearchOneLevel(model, message, pos_filer, word_selector, scale = .02):
         
         #FACTORS IN SCORE ADJUSTMENTS
         #repeats
-        score_adjust = decayRepeat(word, message.sequence, 100 * scale)
+        #score_adjust = decayRepeat(word, message.sequence, 100 * scale)
+        score_adjust = 0
         #length word
-        score_adjust += len(word) * scale / 50
+        #score_adjust += len(word) * scale / 50
         
         m = Message(new_prob + score_adjust, state, [word] + message.sequence, start_index)
 
@@ -354,7 +355,7 @@ def sampleLine(lines):
     
     top_k = min(10, len(lines))
     
-    probs = list(map(lambda m: m.prob, lines[:top_k]))
+    probs = list(map(lambda m: np.exp(m.prob), lines[:top_k]))
     probs = np.exp(probs) / sum(np.exp(probs))
     
     index = np.random.choice(range(top_k), 1, p=probs)[0]
@@ -382,8 +383,8 @@ def postProcess(poemOrig, model):
     for i in range(n_spots):
             #so we're iterating from the rhyme word, but need to feed in forward
             seq = [y for y in reversed(rev_flat_poem[:i+1])]
-            
-            p, state = model.next_word(seq[0], state)
+
+            p, state = model.next_word(seq[0], state, 0.)
             comma_probs[i] = p[model.get_token(",")]
             
     comma_probs = np.array([y for y in reversed(comma_probs)])

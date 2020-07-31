@@ -2,6 +2,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
 
 class LSTMModel(nn.Module):
     def __init__(self, n_vocab, embedding_size, lstm_size, n_layers = 1, dropout=0.5):
@@ -26,7 +27,7 @@ class LSTMModel(nn.Module):
             torch.zeros(self.lstm_layers, batch_size, self.lstm_size)
         )
 
-    def next_word(self, word, prev_state):
+    def next_word(self, word, prev_state, prev_prob):
         device = self.embedding.weight.device
         
         ind = self.get_token(word)
@@ -36,10 +37,11 @@ class LSTMModel(nn.Module):
         output, state = self.lstm(embed, prev_state)
         logits = self.dense(output)
         
-        probs = logits[0][0]
+        probs = torch.softmax(logits, axis=2)
+        probs = probs[0][0]
         probs = probs.cpu().detach().numpy()
         
-        return probs, state
+        return prev_prob + np.log(probs), state
     
     def set_vocab(self, vocab):
         self.vocab = vocab
