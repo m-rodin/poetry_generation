@@ -14,7 +14,7 @@ import torch
 from src.text_prepocessing import simple_clean
 from src.pos_filter import POSFiter, NLTKTagger, UdpipeTagger
 from src.word_selector import WordSelector
-from src.word_embedder import GloveEmbedder
+from src.word_embedder import GloveEmbedder, SentBertEmbedder
 from model import LSTMModel
 
 
@@ -137,17 +137,11 @@ def get_meter2words(word2meters):
     return meter2words
 
 
-def cos_sim(w1, w2):
-    return np.dot(w1, w2) / np.linalg.norm(w1) / np.linalg.norm(w2)
-
-
 def sample_rhyme_pairs(topic, words, word2rhyme, rhyme2words, model_vocab, embedder, topic_pairs = 5, common_pairs = 2):
-    
-    topic_emb = np.mean([embedder.get_emb(word) for word in topic.split()], axis=0)
     
     # дистанция для каждого слова из текстов до prompt
     dist_word2topic = dict(zip(
-        words, [cos_sim(topic_emb, embedder.get_emb(word)) for word in words]
+        words, [embedder.get_dist(topic, word) for word in words]
     ))
     
     rhyme_used = set()
@@ -434,10 +428,11 @@ if(__name__ == "__main__"):
         seed = 1
     np.random.seed(seed)
     
-    embedder = GloveEmbedder()
-
     source_words, source_texts = get_source_texts('./data/whitman/input.txt')
 
+    #embedder = GloveEmbedder()
+    embedder = SentBertEmbedder(source_texts)
+    
     cmu_word2meters, cmu_word2syllables, cmu_word2rhyme = get_cmu_dicts('./cmudict-0.7b.txt')
 
     words, word2meters, meter2words, word2syllable, word2rhyme, rhyme2words = intersect_words(
