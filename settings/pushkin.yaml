@@ -1,0 +1,18 @@
+source:
+    class: PushkinSource
+    file: data/pushkin/input.txt
+embedder:
+    class: FasttextBinEmbedder
+    file: dicts_ru/ft_native_300_ru_wiki_lenta_lower_case.bin
+cmu:
+    class: VoxforgeRuReader
+    file: dicts_ru/voxforge_ru.dic
+sonet:
+    rhyme_pattern: "AbAb CCdd EffE gg"
+    stress_pattern: '01'
+    feet_number: 4
+    topic_pairs: 5
+pos_filter:
+    class: DummyPOSFiter
+params:
+    model_dir: model_ru2

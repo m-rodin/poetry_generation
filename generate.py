@@ -4,6 +4,7 @@
 
 # +
 import sys
+import yaml
 import numpy as np
 import itertools
 import pickle
@@ -11,84 +12,21 @@ import queue as Q
 import time
 import torch
 
-from src.text_prepocessing import simple_clean
-from src.pos_filter import POSFiter, NLTKTagger, UdpipeTagger
+import argparse
+
+from src.source_prepocess import EngSource, PushkinSource
+from src.cmu_reader import CMUEngReader, VoxforgeRuReader
+from src.pos_filter import EnPOSFiter, DummyPOSFiter, UdpipeTagger
 from src.word_selector import WordSelector
-from src.word_embedder import GloveEmbedder, SentBertEmbedder
+from src.word_embedder import *
+from src.sonet import Sonet
+
 from model import LSTMModel
 
 
 # -
 
-def get_cmu_dicts(cmu_path = "./cmudict-0.7b.txt"):
-    # vowels - гласные звуки
-    vowels = ["AA", "AE", "AH", "AO", "AW", "AY", "EH", "ER", "EY", "IH", "IY", "OW", "OY", "UH", "UW"]
-    # stressed vowel - ударный гласный
-    stressed_v = [v + "1" for v in vowels] + [v + "2" for v in vowels]
-
-    # meters - размер ритм
-    word2meters= {}
-
-    # syllables - слоги
-    word2syllables = {}
-
-    # rhyme - рифма
-    word2rhyme = {}
-
-    with open(cmu_path, encoding='windows-1252') as f:
-        lines = [line.rstrip("\n").split() for line in f if (";;;" not in line)]
-    
-    word2meters["i"] = ["0"]
-    word2meters["the"] = ["0"]
-    
-    for i, line in enumerate(lines):
-        # line[0] - слово
-        # line[1:] - список слогов
-
-        word = line[0].lower()
-        syllables = line[1:]
-                
-        # если есть () одновременно, то скорее всего в конце (1), удалим 
-        if "(" in word and ")" in word:
-            word = word[:-3]
-
-        # syllables, оставляем чисты слоги, фильтруем от ударений
-        word2syllables[word] = [''.join(i for i in syllable if not i.isdigit()) for syllable in syllables]
-
-        # ищем самое правое вхождение в конце ударной гласной (получится что самое длинное слово в приоритете, но так исключают -1)
-        r_index = max([''.join(syllables).rfind(v) for v in stressed_v])
-        # после этого считаем концовку слова после ударной гласной
-        word2rhyme[word] = ''.join(i for i in ''.join(syllables)[r_index:] if not i.isdigit())
-
-        #THIS IF STATEMENT ALLOWS FOR MULTIPLE PRONUNCIATIONS OF A WORD
-        if word not in word2meters:
-            word2meters[word] = []
-
-        meter = ""
-        for syllable in syllables:
-            for char in syllable:
-                if char in "012":
-                    if char == "2":
-                        meter += "1"
-                    else:
-                        meter += char
-        
-        if meter not in word2meters[word]:
-            word2meters[word].append(meter)
-            
-    return word2meters, word2syllables, word2rhyme
-
-
-def get_source_texts(texts_path):
-    texts = open(texts_path)
-    texts = texts.read()
-    
-    words = set([simple_clean(word) for word in texts.split()])
-    
-    return words, texts
-
-
-def intersect_words(source_words, embedder, cmu_word2meters, cmu_word2syllables, cmu_word2rhyme):
+def intersect_words(source_words, embedder, cmu_word2meters, cmu_word2rhyme):
     words = []
 
     for word, meters in cmu_word2meters.items():
@@ -100,15 +38,11 @@ def intersect_words(source_words, embedder, cmu_word2meters, cmu_word2syllables,
         if not embedder.exist_emb(word):
             continue
 
-        # оставляем только слова с правильным ритмом
-        for meter in meters:
-            if meter == '1' * (len(meter) % 2) + '01' * (len(meter) // 2):
-                words += [word]
+        words += [word]
     
     words = set(words)
     
     word2meters = dict((word, cmu_word2meters[word]) for word in words)
-    word2syllable = dict((word, cmu_word2syllables[word]) for word in words)
     word2rhyme = dict((word, cmu_word2rhyme[word]) for word in words)
 
     rhyme2words = {}    
@@ -124,7 +58,7 @@ def intersect_words(source_words, embedder, cmu_word2meters, cmu_word2syllables,
                 meter2words[meter] = set([])
             meter2words[meter].add(word)
         
-    return list(words), word2meters, meter2words, word2syllable, word2rhyme, rhyme2words
+    return list(words), word2meters, meter2words, word2rhyme, rhyme2words
 
 
 def get_meter2words(word2meters):
@@ -137,93 +71,68 @@ def get_meter2words(word2meters):
     return meter2words
 
 
-def sample_rhyme_pairs(topic, words, word2rhyme, rhyme2words, model_vocab, embedder, topic_pairs = 5, common_pairs = 2):
-    
-    # дистанция для каждого слова из текстов до prompt
+# +
+def intersection(lst1, lst2): 
+    return list(set(lst1) & set(lst2))
+
+def sample_topic_rhyme_pair(topic, suitable_words, embedder, rhyme2words, rhyme_used):
+
+    candidate_pairs = []
+    for rhyme, words in rhyme2words.items():
+        # check rhyme not used already
+        if rhyme in rhyme_used:
+            continue
+
+        candidate_words = intersection(suitable_words, words)
+        candidate_pairs += list(itertools.combinations(candidate_words, 2))
+
     dist_word2topic = dict(zip(
-        words, [embedder.get_dist(topic, word) for word in words]
+        suitable_words, [embedder.get_dist(topic, word) for word in suitable_words]
     ))
+
+    # через дистанции считаем странные вероятности по которым потом сэмплируем
+    probs = []
+    for pair in candidate_pairs:
+        if all(dist_word2topic[word] > 0 for word in pair):
+            p = max([dist_word2topic[word] for word in pair])**7
+        else:
+            p = 0
+        probs.append(p)
+
+    # norm probs
+    probs_sum = np.sum(probs)
+    probs = [prob / probs_sum for prob in probs]
+
+    # sample one using probs
+    pair_index = np.random.choice(range(len(candidate_pairs)), 1, p=probs)[0]
+
+    return candidate_pairs[pair_index]
+
+
+# -
+
+def sample_rhyme_pairs(
+        topic,
+        sonet,
+        word_selectors,
+        word2rhyme,
+        rhyme2words,
+        embedder
+    ):
     
     rhyme_used = set()
-    
     pairs_picked = []
     
-    for i in range(topic_pairs):
-        # candidate pairs for this round
-        # все пары что есть в rhyme2words засунем в pairs (сэмплируем комбинацию длиной 2)
-        pairs = []
-        for rhyme, words in rhyme2words.items():
-            # check rhyme not used already
-            if rhyme not in rhyme_used:
-                pairs += list(itertools.combinations(words, 2))
-                
-        # через дистанции считаем странные вероятности по которым потом сэмплируем
-        probs = []
-        for pair in pairs:
-            if all(dist_word2topic[x] > 0 for x in pair):
-                p = max([dist_word2topic[x] for x in pair])**7
-            else:
-                p = 0
-            probs.append(p)
+    for pattern in sonet.rhymes:
+        gen = word_selectors[pattern].get_suitable_words(len(pattern))
+        suitable_words = [w for w, ind in gen]
         
-        # norm probs
-        probs_sum = np.sum(probs)
-        probs = [prob / probs_sum for prob in probs]
-        
-        # sample one using probs
-        pair_index = np.random.choice(range(len(pairs)), 1, p=probs)[0]
-        
-        pairs_picked.append(pairs[pair_index])
-        first_word = pairs[pair_index][0]
-        rhyme = word2rhyme[first_word]
-        rhyme_used.add(rhyme)
-
-    # common rhyme pairs
-    alphabet = set("abcdefghijklmnopqrstuvwxyz")
-    common = pickle.load(open("./CommonRhymes.pkl", "rb"))
-    
-    # дернули топ 50 рифм (тут какой-то тупой фильтр на алфавит, выглядит бесполезным)
-    pairs = [x[0] for x in common.most_common(50) if all(word not in alphabet for word in x[0])]
-    
-    for i in range(common_pairs):
-        good_pairs = []
-        for pair in pairs:
-            if pair[0] not in word2rhyme:
-                continue
-            if word2rhyme[pair[0]] in rhyme_used:
-                continue
-#           if pair[0] not in model_vocab:
-#               continue
-#           if pair[1] not in model_vocab:
-#               continue
-            good_pairs.append(pair)
-        
-        common_index = np.random.choice(len(good_pairs), 1)[0]
-        pair = good_pairs[common_index]
+        pair = sample_topic_rhyme_pair(topic, suitable_words, embedder, rhyme2words, rhyme_used)
         
         pairs_picked.append(pair)
-        
-        rhyme = word2rhyme[pair[0]]
-        rhyme_used.add(rhyme)        
+        rhyme_used.add(word2rhyme[pair[0]]) 
     
     return pairs_picked
-
-
-# пересортировывает рифмованные пары в соответствии с тем как надо в результате
-def make_author_order(rhymes, order = ''):
-    rhymes = np.array(rhymes).reshape(-1)
-
-    index = np.array([
-            [0,2],
-            [1,3],
-            [4,6],
-            [5,7],
-            [8,10],
-            [9,11],
-            [12,13]
-        ]).reshape(-1)
-
-    return rhymes[index]
 
 
 class Message:
@@ -416,58 +325,92 @@ def postProcess(poemOrig, model):
 
     return ret
 
-if(__name__ == "__main__"):
 
+# +
+def get_inited_class(setting):
+    source_class = globals()[setting['class']]
+    return source_class(**setting)
+
+def get_instances(settings):
+    source = get_inited_class(settings['source'])
+    embedder = get_inited_class(settings['embedder'])
+    cmu_reader = get_inited_class(settings['cmu'])
+    
+    if 'tagger' in settings['pos_filter']:
+        tagger = get_inited_class(settings['pos_filter']['tagger'])
+    else:
+        tagger = None
+        
+    pos_filter = get_inited_class({**settings['pos_filter'], 'tagger': tagger})
+
+    return source, embedder, cmu_reader, pos_filter
+
+
+# -
+
+def generate(args):
     # system arguments
-    topic = sys.argv[1]
+    topic = args.topic
     
     # seed for reproducibility
-    try:
-        seed = int(sys.argv[2])
-    except:
-        seed = 1
-    np.random.seed(seed)
+    np.random.seed(args.seed)
     
-    source_words, source_texts = get_source_texts('./data/whitman/input.txt')
+    with open(args.settings) as f:
+        settings = yaml.load(f, Loader=yaml.BaseLoader)
 
-    #embedder = GloveEmbedder()
-    embedder = SentBertEmbedder(source_texts)
+    source, embedder, cmu_reader, pos_filter = get_instances(settings)
+
+    source_words = source.get_words()
+    source_texts = source.get_texts()
     
-    cmu_word2meters, cmu_word2syllables, cmu_word2rhyme = get_cmu_dicts('./cmudict-0.7b.txt')
+    cmu_word2meters, cmu_word2rhyme = cmu_reader.get_dicts()
 
-    words, word2meters, meter2words, word2syllable, word2rhyme, rhyme2words = intersect_words(
-        source_words, embedder, cmu_word2meters, cmu_word2syllables, cmu_word2rhyme
+    words, word2meters, meter2words, word2rhyme, rhyme2words = intersect_words(
+        source_words, embedder, cmu_word2meters, cmu_word2rhyme
     )
     
-    cmu_meter2words = get_meter2words(cmu_word2meters)
-    cmu_words = list(cmu_word2meters.keys())
+    pos_filter.init_dicts(words)
+        
+    #cmu_meter2words = get_meter2words(cmu_word2meters)
+    #cmu_words = list(cmu_word2meters.keys())
     
-    with open('model/vocab.pkl', 'rb') as vocab_file:
-        vocab = pickle.load(vocab_file)
+    sonet = Sonet(**settings['sonet'])
     
-    model = LSTMModel(len(vocab), 300, 1000, 3)
-    model.load_state_dict(torch.load('model/model-last.pth'))
-    model.set_vocab(vocab)
-    model.eval()
-    
-    line_pattern = "0101010101"
-    sonnet_pattern = "ABAB CDCD EFEF GG"
-    
-    # здесь скорее всего надо cmu_meter2words
-    word_selector = WordSelector(meter2words, line_pattern)
-
-    pos_tagger = UdpipeTagger('./english-gum-ud-2.5-191206.udpipe')
-    pos_filer = POSFiter(words, pos_tagger)
+    word_selectors = {}
+    for line_pattern in set(sonet.line_patterns):
+        # здесь скорее всего надо cmu_meter2words
+        word_selectors[line_pattern] = WordSelector(meter2words, line_pattern)
     
     width = 20
     
-    rhyme_pairs = sample_rhyme_pairs(topic, words, word2rhyme, rhyme2words, {}, embedder)
-    last_words = make_author_order(rhyme_pairs, sonnet_pattern)
+    rhyme_pairs = sample_rhyme_pairs(
+        topic,
+        sonet,
+        word_selectors,
+        word2rhyme,
+        rhyme2words,
+        embedder
+    )
+    last_words = sonet.make_author_order(rhyme_pairs)
+    
+    model_dir = settings['params']['model_dir']
+    
+    # загрузка модели
+    with open(model_dir + '/vocab.pkl', 'rb') as vocab_file:
+        vocab = pickle.load(vocab_file)
+    
+    model = LSTMModel(len(vocab), 300, 1000, 3)
+    model.load_state_dict(torch.load(model_dir + '/model-last.pth'))
+    model.set_vocab(vocab)
+    model.eval()
     
     poem = []
     
     # для каждого слова ищем строчки
-    for last_word_in_line in last_words:
+    for line_i, last_word_in_line in enumerate(last_words):
+        line_pattern = sonet.line_patterns[line_i]
+        word_selector = word_selectors[line_pattern]
+        
         meter_len = len(word2meters[last_word_in_line][0])
 
         end_index = len(line_pattern) - meter_len
@@ -477,10 +420,10 @@ if(__name__ == "__main__"):
                 [last_word_in_line],
                 end_index,
                 word_selector,
-                pos_filer,
+                pos_filter,
                 width,
             )
-
+        
         line = sampleLine(lines)
 
         poem.append(line)
@@ -491,3 +434,15 @@ if(__name__ == "__main__"):
         print("(saved in output_poems)")
         print("\n topic:" + topic, "\n\n" + poem_p)
         text_file.write(topic + "\n\n" + poem_p)
+
+
+if(__name__ == "__main__"):
+
+    parser = argparse.ArgumentParser()
+    
+    parser.add_argument('topic', metavar='topic', type=str, help='sonet topic')
+    parser.add_argument('--settings', type=str, default="settings/pushkin.yaml", help='file containing settings')
+    parser.add_argument('--seed', type=int, default=1, help='random seed')
+    
+    args = parser.parse_args()
+    generate(args)

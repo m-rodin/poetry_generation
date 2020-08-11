@@ -9,9 +9,9 @@ class NLTKTagger:
             return tag[0][1]
         
 class UdpipeTagger:
-    def __init__(self, model_path = None):
-        if model_path:
-            self.model = Model(model_path)
+    def __init__(self, file = None, **kwarg):
+        if file:
+            self.model = Model(file)
         else:
             raise Exception("You should pass the model")
         
@@ -26,9 +26,25 @@ class UdpipeTagger:
 
 # -
 
-class POSFiter:
-    def __init__(self, words, tagger):
-        self.word2pos = self.get_word2pos(words, tagger)
+class DummyPOSFiter:
+    def __init__(self, **kwarg):
+        pass
+        
+    def can_follow(self, word1, word2):
+        return True
+    
+    def init_dicts(self, words):
+        pass
+
+
+class EnPOSFiter:
+    def __init__(self, tagger, **kwarg):
+        self.tagger = tagger        
+        self.word2pos = {}
+        self.possible_pos_pairs = {}
+        
+    def init_dicts(self, words):
+        self.word2pos = self.get_word2pos(words, self.tagger)
         self.possible_pos_pairs = self.get_possible_pos_pairs()
 
     def can_follow(self, word1, word2):

@@ -1,0 +1,21 @@
+source:
+    class: EngSource
+    file: data/whitman/input.txt
+embedder:
+    class: GloveEmbedder
+    file: dicts_eng/glove.6B.300d.word2vec.txt
+cmu:
+    class: CMUEngReader
+    file: dicts_eng/cmudict-0.7b.txt
+sonet:
+    rhyme_pattern: "ABAB CDCD EFEF GG"
+    stress_pattern: '01'
+    feet_number: 5
+    topic_pairs: 5
+pos_filter:
+    class: EnPOSFiter
+    tagger:
+        class: UdpipeTagger
+        file: dicts_eng/english-gum-ud-2.5-191206.udpipe
+params:
+    model_dir: model

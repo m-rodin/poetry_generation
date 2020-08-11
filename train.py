@@ -70,7 +70,11 @@ def train(flags):
     dataset = torchtext.datasets.LanguageModelingDataset(flags.train_file, TEXT)
     dataset[0].text = dataset[0].text[::-1]
     
-    TEXT.build_vocab(dataset, vectors="glove.6B.300d")
+    if flags.custom_embeddings:
+        custom_embeddings = torchtext.vocab.Vectors(name=os.path.abspath(flags.custom_embeddings))
+        TEXT.build_vocab(dataset, vectors=custom_embeddings)
+    else:
+        TEXT.build_vocab(dataset, vectors="glove.6B.300d")
     
     weight_matrix = TEXT.vocab.vectors
     vocab = TEXT.vocab
@@ -157,6 +161,8 @@ if __name__ == '__main__':
                        help='file containing train texts')
     parser.add_argument('--save_dir', type=str, default='model',
                        help='directory to store checkpointed models')
+    parser.add_argument('--custom_embeddings', type=str, default='',
+                       help='path to custom embeddings')
     parser.add_argument('--lstm_size', type=int, default=1000,
                        help='size of LSTM hidden state')
     parser.add_argument('--lstm_layers', type=int, default=3,
